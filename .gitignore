@@ -1,0 +1,9 @@
+*.exe
+.env
+*.bat
+working_commands.py
+thanks_command.py
+orig_thanks_command.py
+CommenBotEnv/Scripts/activate
+CommenBotEnv/Scripts/Activate.ps1
+CommenBotEnv/Scripts/__pycache__
