@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 #import ect_bot_changes
-import we_got_it #THE BASE FUNCTIONALITY OF THE BOT, INCLUDES MOST CURRENT ACTIVE FUNCTIONS AND COMMANADS
+import functions #THE BASE FUNCTIONALITY OF THE BOT, INCLUDES MOST CURRENT ACTIVE FUNCTIONS AND COMMANADS
 import listening   #USED TO VERIFY THE BOT IS CONNECTED
 import test_bench  #THE MODULE FOR TALKING TO THE BOT IN THE DISCORD TEST SERVER
 from dotenv import dotenv_values, load_dotenv  #USED TO LOAD THE ENVIROMENT VARIABLES SUCH AS PASSWORDS AND API KEYS
@@ -20,8 +20,8 @@ async def on_ready():
 
 listening.setup(bot)
 
-#test_bench.setup(bot)
+test_bench.setup(bot)
 
-we_got_it.setup(bot)
+functions.setup(bot)
 
 bot.run(secrets['bot_token'])
