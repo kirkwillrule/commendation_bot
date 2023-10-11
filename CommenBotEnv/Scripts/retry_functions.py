@@ -2,9 +2,12 @@ import discord
 from discord.ext import commands
 import asyncio
 import pymongo
+import functools
+from functools import partial
 from motor.motor_asyncio import AsyncIOMotorClient # https://motor.readthedocs.io/en/stable/tutorial-asyncio.html
 from dotenv import dotenv_values, load_dotenv
 from datetime import datetime, timezone 
+
 
 # Define constants
 award_message = "{thankee_mention} has been awarded points!  They now have {thankee_total} points!"
@@ -27,136 +30,55 @@ users_thanks  = db.users_thanks
 user_nickname = db.user_nickname
 yes_role_name = 'YesRep'
 no_role_name = 'NoRep'
+dnr_timer = 15.0 #how long you have to reply to thumbsup/down
 yes_rep_id = 1119125752311447572
 no_rep_id = 1119125876320239638
 cooldown_dict = {}
+valid_thankies = []
+invalid_thankies = []
+
 cooldown_time = 10  # change to however long you want the cooldown time to be. anything 0 or greater
 def setup(bot): # Create a bot instance
-    
     @bot.command()
+
     async def thanks(ctx, *args):
         thanker = ctx.author
+        valid_thankies.clear()
+        invalid_thankies.clear()
 
-        valid_thankies = []
-        invalid_thankies = []
+        # Lists to collect users who can receive points immediately and those who need opt-in/opt-out
+        valid_users = []
+        opt_in_out_users = []
 
-        # First, process valid users who can be assigned points
         for arg in args:
             thankee = None
-
-            # Try to convert the argument to a mentioned user
             try:
                 thankee = await commands.MemberConverter().convert(ctx, arg)
             except commands.BadArgument:
                 pass
 
             if thankee:
-                # Check if the mentioned user is the thanker
                 if thankee == thanker:
                     invalid_thankies.append(thankee)
-                    await ctx.send(giving_to_self.format(thankee_mention=thankee.mention))
-                elif discord.utils.get(thankee.roles, name=yes_role_name) is not None:  # Check if the mentioned user has the "yes_rep" role
-                    await handle_thanks(ctx, thanker, thankee)
-                elif discord.utils.get(thankee.roles, name=no_role_name) is not None:  # Check if the mentioned user has the "no_rep" role
+                elif discord.utils.get(thankee.roles, name=yes_role_name) is not None:
+                    valid_users.append(thankee)
+                elif discord.utils.get(thankee.roles, name=no_role_name) is not None:
                     invalid_thankies.append(thankee)
                 else:
-                    # Prompt the user to opt in or out
-                    thumbs_up = '👍'
-                    thumbs_down = '👎'
+                    opt_in_out_users.append(thank_single(ctx, arg, thanker, valid_thankies, invalid_thankies))
 
-                    message = await ctx.send(f"{thankee.mention}, would you like to opt in or out? React with {thumbs_up} for opt-in or {thumbs_down} for opt-out.")
-
-                    await message.add_reaction(thumbs_up)
-                    await message.add_reaction(thumbs_down)
-
-                    def check(reaction, user):
-                        return (
-                            user == thankee
-                            and str(reaction.emoji) in [thumbs_up, thumbs_down]
-                            and reaction.message.id == message.id
-                        )
-
-                    try:
-                        reaction, _ = await bot.wait_for('reaction_add', timeout=600.0, check=check)
-
-                        if str(reaction.emoji) == thumbs_up:
-                            role = ctx.guild.get_role(yes_rep_id)
-                            await thankee.add_roles(role)
-                            await ctx.send(opt_in_message.format(thankee_mention=thankee.mention))
-                            valid_thankies.append(thankee)
-                        elif str(reaction.emoji) == thumbs_down:
-                            role = ctx.guild.get_role(no_rep_id)
-                            await thankee.add_roles(role)
-                            await ctx.send(opt_out_message.format(thankee_mention=thankee.mention))
-                            invalid_thankies.append(thankee)
-
-                    except asyncio.TimeoutError:
-                        await ctx.send(f"{thankee}, you didn't respond in time. Please try again later.")
-                        invalid_thankies.append(thankee)
-
-        # Next, process the users who can't be assigned points (members without roles)
-        for arg in args:
-            thankee = None
-
-            # Try to convert the argument to a mentioned user
-            try:
-                thankee = await commands.MemberConverter().convert(ctx, arg)
-            except commands.BadArgument:
-                pass
-
-            if thankee:
-                if thankee not in valid_thankies and thankee not in invalid_thankies:
-                    # These are members without roles who were not processed earlier
-                    thumbs_up = '👍'
-                    thumbs_down = '👎'
-
-                    message = await ctx.send(f"{thankee.mention}, would you like to opt in or out? React with {thumbs_up} for opt-in or {thumbs_down} for opt-out.")
-
-                    await message.add_reaction(thumbs_up)
-                    await message.add_reaction(thumbs_down)
-
-                    def check(reaction, user):
-                        return (
-                            user == thankee
-                            and str(reaction.emoji) in [thumbs_up, thumbs_down]
-                            and reaction.message.id == message.id
-                        )
-
-                    try:
-                        reaction, _ = await bot.wait_for('reaction_add', timeout=600.0, check=check)
-
-                        if str(reaction.emoji) == thumbs_up:
-                            role = ctx.guild.get_role(yes_rep_id)
-                            await thankee.add_roles(role)
-                            await ctx.send(opt_in_message.format(thankee_mention=thankee.mention))
-                        elif str(reaction.emoji) == thumbs_down:
-                            role = ctx.guild.get_role(no_rep_id)
-                            await thankee.add_roles(role)
-                            await ctx.send(opt_out_message.format(thankee_mention=thankee.mention))
-
-                    except asyncio.TimeoutError:
-                        await ctx.send(f"{thankee}, you didn't respond in time. Please try again later.")
-
-        # Handle valid thankies
-        for thankee in valid_thankies:
+        # Process users with 'yesrep' role immediately
+        for thankee in valid_users:
             await handle_thanks(ctx, thanker, thankee)
+
+        # Concurrently process opt-in/opt-out for users without roles
+        await asyncio.gather(*opt_in_out_users)
 
         if invalid_thankies:
             invalid_mention_list = ', '.join([str(thankee) for thankee in invalid_thankies])
             await ctx.send(f"The following mentions are invalid: {invalid_mention_list}")
 
 
-            for thankee in valid_thankies:
-                await handle_thanks(ctx, thanker, thankee)
-                        # Update the cooldown dictionary with the current time for the thanker-thankee pair
-                if thankee.id not in cooldown_dict:
-                    cooldown_dict[thankee.id] = {}
-                cooldown_dict[thankee.id][thanker.id] = ctx.message.created_at
-
-
-            if invalid_thankies:
-                invalid_mention_list = ', '.join([str(thankee) for thankee in invalid_thankies])
-                await ctx.send(f"The following mentions are invalid: {invalid_mention_list}")
 
     @bot.command()
     async def scorecard(ctx, user: discord.Member = None):
@@ -189,10 +111,13 @@ def setup(bot): # Create a bot instance
             return
         elif in_cooldown(ctx, thanker, thankee):
             await ctx.send(still_on_cooldown.format(thankee_mention=thankee.mention))
-            return   
+            return
+           
         await save_user_thanks(ctx, thanker, thankee)
         thankee_total = await update_user_total(thankee)
         await ctx.send(award_message.format(thankee_mention=thankee.mention, thankee_total=thankee_total))
+
+        add_to_cooldown(ctx, thanker, thankee) #append thanker:thankee pair to cooldown dict after handling thanks
 
     async def save_user_thanks(ctx, thanker, thankee):
         user_thanks = {'thanker': thanker.id, 'thankee': thankee.id, 'created_at': ctx.message.created_at.timestamp()}
@@ -233,4 +158,59 @@ def setup(bot): # Create a bot instance
         cursor = users.find().sort("total_thanks", pymongo.DESCENDING).limit(limit)
         top_users = await cursor.to_list(length=limit)
         return top_users
+    
+    def add_to_cooldown(ctx, thanker, thankee):
+        if thankee.id not in cooldown_dict:
+            cooldown_dict[thankee.id] = {}
+        cooldown_dict[thankee.id][thanker.id] = datetime.now(timezone.utc)
 
+    async def thank_single(ctx, arg, thanker, valid_thankies, invalid_thankies):
+        try:
+            thankee = await commands.MemberConverter().convert(ctx, arg)
+        except commands.BadArgument:
+            return
+
+        if thankee:
+            if thankee == thanker:
+                invalid_thankies.append(thankee)
+            elif discord.utils.get(thankee.roles, name=yes_role_name) is not None:
+                valid_thankies.append(thankee)
+            elif discord.utils.get(thankee.roles, name=no_role_name) is not None:
+                invalid_thankies.append(thankee)
+            else:
+                thumbs_up = '👍'
+                thumbs_down = '👎'
+
+                message = await ctx.send(f"{thankee.mention}, would you like to opt in or out? React with {thumbs_up} for opt-in or {thumbs_down} for opt-out.")
+
+                await message.add_reaction(thumbs_up)
+                await message.add_reaction(thumbs_down)
+
+                def check(reaction, user):
+                    return (
+                        user == thankee
+                        and str(reaction.emoji) in [thumbs_up, thumbs_down]
+                        and reaction.message.id == message.id
+                    )
+
+                try:
+                    reaction, _ = await bot.wait_for('reaction_add', timeout=dnr_timer, check=check)
+
+                    if str(reaction.emoji) == thumbs_up:
+                        role = ctx.guild.get_role(yes_rep_id)
+                        await thankee.add_roles(role)
+                        await ctx.send(opt_in_message.format(thankee_mention=thankee.mention))
+                        valid_thankies.append(thankee)
+
+                        # After opting in, assign points
+                        await handle_thanks(ctx, thanker, thankee)
+
+                    elif str(reaction.emoji) == thumbs_down:
+                        role = ctx.guild.get_role(no_rep_id)
+                        await thankee.add_roles(role)
+                        await ctx.send(opt_out_message.format(thankee_mention=thankee.mention))
+                        invalid_thankies.append(thankee)
+
+                except asyncio.TimeoutError:
+                    await ctx.send(f"{thankee.mention}, you didn't respond in time. Please try again later.")
+                    invalid_thankies.append(thankee)

@@ -1,7 +1,9 @@
 import discord
 from discord.ext import commands
 #import ect_bot_changes
-import functions #THE BASE FUNCTIONALITY OF THE BOT, INCLUDES MOST CURRENT ACTIVE FUNCTIONS AND COMMANADS
+import sync_functions 
+import admin_commands #admin only commands
+import retry_functions #THE BASE FUNCTIONALITY OF THE BOT, INCLUDES MOST CURRENT ACTIVE FUNCTIONS AND COMMANADS
 import listening   #USED TO VERIFY THE BOT IS CONNECTED
 import test_bench  #THE MODULE FOR TALKING TO THE BOT IN THE DISCORD TEST SERVER
 from dotenv import dotenv_values, load_dotenv  #USED TO LOAD THE ENVIROMENT VARIABLES SUCH AS PASSWORDS AND API KEYS
@@ -16,12 +18,16 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 async def on_ready():
     print(f'Logged in as {bot.user.name}')
     
-    permissions = discord.Permissions(2064000588865)  # Create Permissions object from the permission integer, this verifys the kinds of things the bot is allowed to do 
+    permissions = discord.Permissions(8)  # Create Permissions object from the permission integer, this verifys the kinds of things the bot is allowed to do 
 
 listening.setup(bot)
 
-test_bench.setup(bot)
+#test_bench.setup(bot)
 
-functions.setup(bot)
+#sync_functions.setup(bot)
+
+retry_functions.setup(bot)
+
+#admin_commands.setup(bot)
 
 bot.run(secrets['bot_token'])
